@@ -59,7 +59,7 @@ typedef struct _RTL_BALANCED_NODE {
 			UCHAR Red : 1;                                                  //0x10
 			UCHAR Balance : 2;                                              //0x10
 		};
-		ULONGLONG ParentValue;                                              //0x10
+		size_t ParentValue;                                                 //0x10
 	};
 }RTL_BALANCED_NODE, * PRTL_BALANCED_NODE;
 
@@ -393,6 +393,7 @@ NTSTATUS NTAPI NtLoadDllMemory(
 /*
 	NtLoadDllMemoryEx dwFlags
 */
+
 //If this flag is specified, all subsequent flags will be ignored.
 //Also, will be incompatible with Win32 API.
 #define LOAD_FLAGS_NOT_MAP_DLL						0x10000000
@@ -408,13 +409,16 @@ NTSTATUS NTAPI NtLoadDllMemory(
 //If this flag is specified, DllName and DllFullName cannot be nullptr,
 //	they can be arbitrary strings without having to be correct file names and paths.
 //Otherwise, DllName and DllFullName will use random names if they are nullptr.
-//For compatibility with GetModuleHandle, DllName and DllFullName should be guaranteed to always end in .dll
+//For compatibility with GetModuleHandle, DllName and DllFullName should be guaranteed to always end in ".dll"
 #define LOAD_FLAGS_USE_DLL_NAME						0x00000004
+
+//Dont call LdrpHandleTlsData routine if this flag is specified.
+#define LOAD_FLAGS_NOT_HANDLE_TLS					0x00000008
 
 
 NTSTATUS NTAPI NtLoadDllMemoryExW(
 	OUT HMEMORYMODULE* BaseAddress,
-	OUT PLDR_DATA_TABLE_ENTRY* LdrEntry OPTIONAL,
+	OUT PVOID* LdrEntry OPTIONAL,
 	IN DWORD dwFlags,
 	IN LPVOID BufferAddress,
 	IN size_t BufferSize,
@@ -433,19 +437,59 @@ VOID NTAPI RtlRbInsertNodeEx(IN PRTL_RB_TREE Tree, IN PRTL_BALANCED_NODE Parent,
 // RtlRbRemoveNode
 VOID NTAPI RtlRbRemoveNode(IN PRTL_RB_TREE Tree, IN PRTL_BALANCED_NODE Node);
 
-typedef struct _RTL_INVERTED_FUNCTION_TABLE_ENTRY {
+typedef struct _RTL_INVERTED_FUNCTION_TABLE_ENTRY_64 {
 	PIMAGE_RUNTIME_FUNCTION_ENTRY ExceptionDirectory;
 	PVOID ImageBase;
 	ULONG ImageSize;
 	ULONG ExceptionDirectorySize;
-} RTL_INVERTED_FUNCTION_TABLE_ENTRY, * PRTL_INVERTED_FUNCTION_TABLE_ENTRY;
-typedef struct _RTL_INVERTED_FUNCTION_TABLE {
+} RTL_INVERTED_FUNCTION_TABLE_ENTRY_64, * PRTL_INVERTED_FUNCTION_TABLE_ENTRY_64;
+typedef struct _RTL_INVERTED_FUNCTION_TABLE_64 {
 	ULONG Count;
 	ULONG MaxCount;
 	ULONG Epoch;
 	ULONG Overflow;
-	RTL_INVERTED_FUNCTION_TABLE_ENTRY Entries[0x200];
-} RTL_INVERTED_FUNCTION_TABLE, * PRTL_INVERTED_FUNCTION_TABLE;
+	RTL_INVERTED_FUNCTION_TABLE_ENTRY_64 Entries[0x200];
+} RTL_INVERTED_FUNCTION_TABLE_64, * PRTL_INVERTED_FUNCTION_TABLE_64;
+
+//	The correct data structure should be this.
+//
+//typedef struct _RTL_INVERTED_FUNCTION_TABLE_ENTRY_WIN7_32 {
+//  PVOID EntrySEHandlerTableEncoded;
+//	PVOID ImageBase;
+//	ULONG ImageSize;
+//	ULONG SEHandlerCount;
+//} RTL_INVERTED_FUNCTION_TABLE_ENTRY_WIN7_32, * PRTL_INVERTED_FUNCTION_TABLE_ENTRY_WIN7_32;
+//typedef struct _RTL_INVERTED_FUNCTION_TABLE_WIN7_32 {
+//	ULONG Count;
+//	ULONG MaxCount;
+//	ULONG Overflow;
+//	RTL_INVERTED_FUNCTION_TABLE_ENTRY_WIN7_32 Entries[0x200];
+//} RTL_INVERTED_FUNCTION_TABLE_WIN7_32, * PRTL_INVERTED_FUNCTION_TABLE_WIN7_32;
+//
+//
+typedef struct _RTL_INVERTED_FUNCTION_TABLE_ENTRY_WIN7_32 {
+	PVOID ImageBase;
+	ULONG ImageSize;
+	ULONG SEHandlerCount;
+	PVOID NextEntrySEHandlerTableEncoded;
+} RTL_INVERTED_FUNCTION_TABLE_ENTRY_WIN7_32, * PRTL_INVERTED_FUNCTION_TABLE_ENTRY_WIN7_32;
+typedef struct _RTL_INVERTED_FUNCTION_TABLE_WIN7_32 {
+	ULONG Count;
+	ULONG MaxCount;
+	ULONG Overflow;
+	ULONG NextEntrySEHandlerTableEncoded;
+	RTL_INVERTED_FUNCTION_TABLE_ENTRY_WIN7_32 Entries[0x200];
+} RTL_INVERTED_FUNCTION_TABLE_WIN7_32, * PRTL_INVERTED_FUNCTION_TABLE_WIN7_32;
+
+#ifdef _WIN64
+typedef _RTL_INVERTED_FUNCTION_TABLE_ENTRY_64 _RTL_INVERTED_FUNCTION_TABLE_ENTRY, RTL_INVERTED_FUNCTION_TABLE_ENTRY, * PRTL_INVERTED_FUNCTION_TABLE_ENTRY;
+typedef RTL_INVERTED_FUNCTION_TABLE_64 _RTL_INVERTED_FUNCTION_TABLE, RTL_INVERTED_FUNCTION_TABLE, * PRTL_INVERTED_FUNCTION_TABLE;
+#else
+typedef RTL_INVERTED_FUNCTION_TABLE_WIN7_32 _RTL_INVERTED_FUNCTION_TABLE, RTL_INVERTED_FUNCTION_TABLE, * PRTL_INVERTED_FUNCTION_TABLE;
+typedef _RTL_INVERTED_FUNCTION_TABLE_ENTRY_WIN7_32 _RTL_INVERTED_FUNCTION_TABLE_ENTRY, RTL_INVERTED_FUNCTION_TABLE_ENTRY, * PRTL_INVERTED_FUNCTION_TABLE_ENTRY;
+#endif
 
 NTSTATUS NTAPI RtlInsertInvertedFunctionTable(IN PVOID BaseAddress, IN size_t ImageSize);
 NTSTATUS NTAPI RtlRemoveInvertedFunctionTable(IN PVOID ImageBase);
+NTSTATUS NTAPI LdrpHandleTlsData(IN PLDR_DATA_TABLE_ENTRY LdrEntry);
+int NTAPI RtlCaptureImageExceptionValues(PVOID BaseAddress, PDWORD SEHandlerTable, PDWORD SEHandlerCount);
