@@ -1,5 +1,5 @@
-#include "../MemoryModule/NativeFunctionsInternal.h"
-//#include "../MemoryModule/LoadDllMemoryApi.h"
+//#include "../MemoryModule/NativeFunctionsInternal.h"
+#include "../MemoryModule/LoadDllMemoryApi.h"
 #ifndef NT_SUCCESS
 #define NT_SUCCESS(Status) (((NTSTATUS)(Status)) >= 0)
 #endif
@@ -7,6 +7,7 @@
 #pragma warning(disable:4996)
 
 int main() {
+    //return ((int(*)(int))GetProcAddress(LoadLibraryW(L"a.dll"), "exception"))(0);
     LPVOID buffer;
     size_t size;
     FILE* f = fopen("a.dll", "rb");
@@ -20,70 +21,81 @@ int main() {
     fread(buffer = new char[size], 1, size, f);
     fclose(f);
     
-    HMEMORYMODULE m1 = nullptr, m2 = m1, _m1 = m1;
-    char name[MAX_PATH]{};
+    HMEMORYMODULE m1 = nullptr, m2 = m1;
     HMODULE hModule = nullptr;
-    FARPROC test = nullptr;
-    typedef int(*_exception)(int type);
+    FARPROC pfn = nullptr;
+    DWORD MemoryModuleFeatures = 0;
+
+    typedef int(* _exception)(int code);
     _exception exception = nullptr;
-    PWSTR t;
-    DWORD tableSize;
-    DWORD offset = 0, index = 0;
-    HRSRC res;
-    HGLOBAL hRes;
-    PWSTR str;
-    
-    if (!NT_SUCCESS(NtLoadDllMemoryExW(&m1, nullptr, 0, buffer, size, L"kernel64", nullptr))) goto end;
-    //if (!NT_SUCCESS(NtLoadDllMemoryExW(&_m1, nullptr, 0, buffer, size, L"kernel64.dll", nullptr))) goto end;
-    //if (!NT_SUCCESS(NtLoadDllMemoryExW(&m2, nullptr, 0, buffer, size, L"kernel128.dll", L"\\?\\kernel512.dll"))) goto end;
+    HRSRC hRsrc;
+    DWORD SizeofRes;
+    HGLOBAL gRes;
+    char str[10];
 
-    //Load string using FindResource
+    NtQuerySystemMemoryModuleFeatures(&MemoryModuleFeatures);
+    if (MemoryModuleFeatures != MEMORY_FEATURE_ALL) {
+        printf("not support all features on this version of windows.\n");
+    }
+    
+    if (!NT_SUCCESS(NtLoadDllMemoryExW(&m1, nullptr, 0, buffer, 0, L"kernel64", nullptr))) goto end;
+    LoadLibraryW(L"wininet.dll");
+    if (!NT_SUCCESS(NtLoadDllMemoryExW(&m2, nullptr, 0, buffer, 0, L"kernel128", nullptr))) goto end;
+
+    //forward export
     hModule = (HMODULE)m1;
-    //if (!(res = FindResourceW(hModule, MAKEINTRESOURCEW((101 >> 4) + 1), MAKEINTRESOURCEW(6))))goto end;
-    //if (!(hRes = LoadResource(hModule, res)))goto end;
-    //if (!(t = (PWSTR)LockResource(hRes)))goto end;
-    //tableSize = SizeofResource(hModule, res);
-    //while (offset < tableSize) {
-    //    if (index == 101 % 0x10) {
-    //        if (t[offset] != 0x0000) {
-    //            str = &t[offset + 1];
-    //            wprintf(L"Size = %d, String = %s\n", t[offset], str);
-    //        }
-    //        break;
-    //    }
-    //    offset += t[offset] + 1;
-    //    index++;
-    //}
-    //
-    //hModule = GetModuleHandleA("kernel64.dll");
-    //GetModuleFileNameA(hModule, name, MAX_PATH);
-    //if (hModule)test = GetProcAddress(hModule, "thread");
-    //printf("m1:\n\tHMEMORYMODULE\t= 0x%p\n\tHMODULE\t\t= 0x%p\n\tModuleFileName\t= %s\n\ttest\t\t= 0x%p\n\n", m1, hModule, name, test);
-    //if (test) test();
-    
-    //GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)test, &hModule);
-    //GetModuleFileNameA(hModule, name, MAX_PATH);
-    //test = GetProcAddress(hModule, "test");
-    //printf("_m1:\n\tHMEMORYMODULE\t= 0x%p\n\tHMODULE\t\t= 0x%p\n\tModuleFileName\t= %s\n\ttest\t\t= 0x%p\n\n", _m1, hModule, name, test);
-    //if (test)test();
+    pfn = (decltype(pfn))(GetProcAddress(hModule, "Socket")); //ws2_32.WSASocketW
+    pfn = (decltype(pfn))(GetProcAddress(hModule, "VerifyTruse")); //wintrust.WinVerifyTrust
+    hModule = (HMODULE)m2;
+    pfn = (decltype(pfn))(GetProcAddress(hModule, "Socket"));
+    pfn = (decltype(pfn))(GetProcAddress(hModule, "VerifyTruse"));
 
-    //hModule = GetModuleHandleA("kernel128");
-    //GetModuleFileNameA(hModule, name, MAX_PATH);
-    if (hModule)exception = (_exception)GetProcAddress(hModule, "exception");
-    //printf("m2:\n\tHMEMORYMODULE\t= 0x%p\n\tHMODULE\t\t= 0x%p\n\tModuleFileName\t= %s\n\ttest\t\t= 0x%p\n\n", m2, hModule, name, test);
+    //exception
+    hModule = (HMODULE)m1;
+    exception = (_exception)GetProcAddress(hModule, "exception");
     if (exception) {
-        DebugBreak();
-        exception(0);
-        exception(1);
-        exception(2);
-        exception(3);
+        for (int i = 0; i < 4; ++i)exception(i);
+    }
+    
+    //tls
+    pfn = GetProcAddress(hModule, "thread");
+    if (pfn && pfn()) {
+        printf("thread test failed.\n");
+    }
+
+    //resource
+    if (!LoadStringA(hModule, 101, str, 10)) {
+        printf("load string failed.\n");
+    }
+    else {
+        printf("%s\n", str);
+    }
+    if (!(hRsrc = FindResourceA(hModule, MAKEINTRESOURCEA(102), "BINARY"))) {
+        printf("find binary resource failed.\n");
+    }
+    else {
+        if ((SizeofRes = SizeofResource(hModule, hRsrc)) != 0x10) {
+            printf("invalid res size.\n");
+        }
+        else {
+            if (!(gRes = LoadResource(hModule, hRsrc))) {
+                printf("load res failed.\n");
+            }
+            else {
+                if (!LockResource(gRes))printf("lock res failed.\n");
+                else {
+                    printf("resource test success.\n");
+                }
+            }
+        }
     }
 
 end:
     delete[]buffer;
     if (m1)NtUnloadDllMemory(m1);
-    //if (_m1)NtUnloadDllMemory(_m1);
-    //if (m2)NtUnloadDllMemory(m2);
+    FreeLibrary(GetModuleHandleW(L"wininet.dll"));
+    if (m2)NtUnloadDllMemory(m2);
+
     return 0;
 }
 
